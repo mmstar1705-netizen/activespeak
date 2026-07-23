@@ -1,0 +1,19 @@
+{
+  "name": "ActiveSpeak",
+  "short_name": "ActiveSpeak",
+  "description": "AI-powered speaking practice with spaced repetition vocabulary review.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
