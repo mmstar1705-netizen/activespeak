@@ -1,91 +1,56 @@
-export type ProficiencyLevel = 'new' | 'familiar' | 'mastered';
+export type WordStatus = 'new' | 'learning' | 'reviewing' | 'mastered' | 'paused';
 
 export interface Word {
   id: string;
   word: string;
   meaning: string;
-  proficiency: ProficiencyLevel;
-  sm2: SM2State;
-  paused: boolean;
-  successCount: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface SM2State {
+  proficiency: WordStatus;
   ef: number;
   interval: number;
   repetitions: number;
-  nextReview: number;
-  lastReview: number | null;
+  next_review: number;
+  last_review: number | null;
+  paused: boolean;
+  success_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface Group {
+export interface Review {
   id: string;
-  wordIds: string[];
-  index: number;
-  createdAt: number;
+  word_id: string;
+  quality: number;
+  score: number | null;
+  feedback?: string | null;
+  scene?: string | null;
+  user_text?: string | null;
+  reviewed_at: string;
 }
 
-export interface Scenario {
+export interface AppSettings {
+  daily_new_limit: number;
+  scene_word_count: number;
+  mastery_threshold: number;
+  interval_mode: 'conservative' | 'standard' | 'aggressive';
+}
+
+export type SyncStatus = 'online' | 'offline' | 'syncing';
+
+export interface ToastMsg {
   id: string;
-  groupId: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
+export interface Scene {
+  id: string;
+  words: string[];
   prompt: string;
-  wordIds: string[];
-  createdAt: number;
+  nativeText: string;
 }
 
-export interface Feedback {
+export interface ScoreResult {
   score: number;
-  grammarCorrections: string[];
-  nativePolish: string;
-  suggestions: string[];
-  raw: string;
-}
-
-export type IntervalMode = 'conservative' | 'standard' | 'aggressive';
-
-export interface SrsSettings {
-  dailyNewLimit: number;
-  wordsPerScenario: number;
-  masteryThreshold: number;
-  intervalMode: IntervalMode;
-}
-
-export interface SupabaseConfig {
-  url: string;
-  anonKey: string;
-}
-
-export interface Settings {
-  apiKey: string;
-  model: string;
-  baseUrl: string;
-  ttsVoice: string;
-  ttsRate: number;
-  srs: SrsSettings;
-  supabase: SupabaseConfig | null;
-}
-
-export const DEFAULT_SRS: SrsSettings = {
-  dailyNewLimit: 10,
-  wordsPerScenario: 3,
-  masteryThreshold: 5,
-  intervalMode: 'standard',
-};
-
-export const DEFAULT_SETTINGS: Settings = {
-  apiKey: '',
-  model: 'gpt-4o-mini',
-  baseUrl: 'https://api.openai.com/v1',
-  ttsVoice: 'en-US',
-  ttsRate: 1,
-  srs: DEFAULT_SRS,
-  supabase: null,
-};
-
-export interface CachedScenario {
-  scenario: string;
-  semanticGroups: string[][];
-  wordIds: string[];
+  feedback: string;
+  corrections: string[];
 }

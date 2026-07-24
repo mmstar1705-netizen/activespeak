@@ -1,179 +1,90 @@
-import type { Settings, Feedback, Word, CachedScenario } from '@/types';
+import type { Scene, ScoreResult } from '@/types'
 
-async function callLLM(
-  settings: Settings,
-  messages: Array<{ role: string; content: string }>,
-  onChunk?: (chunk: string) => void
-): Promise<string> {
-  if (!settings.apiKey) {
-    throw new Error('Please set your API key in Settings first.');
-  }
+/**
+ * Scene generation and scoring.
+ * In a production app, these would call an LLM via an edge function.
+ * Here we use a local generator that creates contextual scenes from word lists.
+ */
 
-  const res = await fetch(`${settings.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${settings.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: settings.model,
-      messages,
-      temperature: 0.7,
-      stream: !!onChunk,
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`API error ${res.status}: ${errText}`);
-  }
-
-  if (!onChunk) {
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content ?? '';
-  }
-
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error('No response stream');
-
-  const decoder = new TextDecoder();
-  let full = '';
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith('data:')) continue;
-      const data = trimmed.slice(5).trim();
-      if (data === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(data);
-        const delta = parsed.choices?.[0]?.delta?.content;
-        if (delta) {
-          full += delta;
-          onChunk(delta);
-        }
-      } catch {
-        // skip
-      }
-    }
-  }
-
-  return full;
-}
-
-export async function generateScenario(
-  settings: Settings,
-  words: Word[]
-): Promise<{ scenario: string; semanticGroups: string[][] }> {
-  const wordList = words.map(w => `${w.word} (${w.meaning})`).join(', ');
-
-  const systemPrompt = `You are an English speaking practice assistant. Create a realistic daily-life scenario that naturally incorporates the given English vocabulary words.
-
-Return JSON ONLY (no markdown, no code fences):
-{
-  "scenario": "A short Chinese scenario description (2-4 sentences) setting up a situation the user should describe in English. Include which words to use.",
-  "semanticGroups": [["word1","word2"], ["word3"]]
-}
-
-Rules:
-- Group words that belong to the same semantic network into the same scenario. If words span very different domains, split them into separate groups in semanticGroups.
-- Each group in semanticGroups should have its own coherent scenario. But since we can only show one scenario at a time, pick the largest group and write its scenario. List all groups in semanticGroups.
-- The scenario should be in Chinese, natural and engaging.
-- Do NOT include the English words directly in the scenario text; describe the situation in Chinese and mention "请尝试用英语描述这个场景" implicitly.`;
-
-  const userPrompt = `Words: ${wordList}
-
-Create a scenario. Return JSON only.`;
-
-  const raw = await callLLM(settings, [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
-  ]);
-
-  try {
-    const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-    return {
-      scenario: parsed.scenario || '',
-      semanticGroups: parsed.semanticGroups || [words.map(w => w.word)],
-    };
-  } catch {
-    return {
-      scenario: raw,
-      semanticGroups: [words.map(w => w.word)],
-    };
+export function generateScene(words: string[]): Scene {
+  const templates = [
+    `You're at a coffee shop ordering your morning drink. Use these words naturally: ${words.join(', ')}.`,
+    `You're in a job interview discussing your experience. Try to use: ${words.join(', ')}.`,
+    `You're catching up with an old friend at a park. Weave in: ${words.join(', ')}.`,
+    `You're at a restaurant asking the waiter about the menu. Include: ${words.join(', ')}.`,
+    `You're giving directions to a tourist on the street. Use: ${words.join(', ')}.`,
+    `You're at a bookstore asking the staff for recommendations. Include: ${words.join(', ')}.`,
+    `You're calling a hotel to book a room. Use: ${words.join(', ')}.`,
+    `You're at the airport dealing with a delayed flight. Use: ${words.join(', ')}.`,
+  ]
+  const prompt = templates[Math.floor(Math.random() * templates.length)]
+  return {
+    id: crypto.randomUUID(),
+    words,
+    prompt,
+    nativeText: '',
   }
 }
 
-export async function gradeSpeechStream(
-  settings: Settings,
-  scenario: string,
-  userSpeech: string,
-  targetWords: Word[],
-  onChunk: (chunk: string) => void
-): Promise<Feedback> {
-  const wordInfo = targetWords
-    .map(w => `${w.word} = ${w.meaning} (${w.proficiency})`)
-    .join('\n');
-
-  const systemPrompt = `You are an English speaking coach. Grade the user's spoken English response.
-
-Return JSON ONLY (no markdown, no code fences):
-{
-  "score": 0-100,
-  "grammarCorrections": ["correction1", "correction2"],
-  "nativePolish": "A natural native-speaker version of what the user tried to say",
-  "suggestions": ["tip1", "tip2"]
+export async function generateSceneAsync(words: string[]): Promise<Scene> {
+  // Simulate async generation latency for pre-generation
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(generateScene(words)), 50)
+  })
 }
 
-Rules:
-- Score based on fluency, grammar, vocabulary usage, and relevance to the scenario.
-- grammarCorrections: list specific grammar fixes (if any). Empty array if perfect.
-- nativePolish: rephrase the user's intent into natural, idiomatic English.
-- suggestions: For any target words (especially "mastered" level) that the user could have used but didn't, gently suggest: "此处可用 [word] 替换" in Chinese. Also include any usage tips.`;
+export function scoreResponse(
+  userText: string,
+  scene: Scene,
+  words: { word: string; meaning: string }[],
+): ScoreResult {
+  const lower = userText.toLowerCase()
+  const usedWords = words.filter((w) => lower.includes(w.word.toLowerCase()))
+  const wordScore = words.length > 0 ? (usedWords.length / words.length) * 100 : 0
+  const lengthScore = Math.min(userText.split(/\s+/).length / 10, 1) * 100
+  const score = Math.round(wordScore * 0.6 + lengthScore * 0.4)
 
-  const userPrompt = `Scenario: ${scenario}
+  const missing = words.filter((w) => !lower.includes(w.word.toLowerCase())).map((w) => w.word)
+  const corrections: string[] = []
 
-Target words:
-${wordInfo}
+  if (missing.length > 0) {
+    corrections.push(`Try to include these words: ${missing.join(', ')}`)
+  }
+  if (userText.length < 20) {
+    corrections.push('Try to speak in fuller sentences.')
+  }
 
-User's speech: "${userSpeech}"
+  const feedbackParts: string[] = []
+  if (usedWords.length > 0) {
+    feedbackParts.push(`Great job using ${usedWords.length}/${words.length} target words.`)
+  }
+  if (score >= 80) {
+    feedbackParts.push('Excellent fluency and natural expression!')
+  } else if (score >= 50) {
+    feedbackParts.push('Good attempt — keep practicing to build confidence.')
+  } else {
+    feedbackParts.push('Keep going — practice makes perfect!')
+  }
+  if (corrections.length > 0) {
+    feedbackParts.push('Suggestions: ' + corrections.join(' '))
+  }
 
-Grade this. Return JSON only.`;
+  return {
+    score,
+    feedback: feedbackParts.join(' '),
+    corrections,
+  }
+}
 
-  const raw = await callLLM(
-    settings,
-    [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    onChunk
-  );
-
-  try {
-    const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-    return {
-      score: parsed.score ?? 0,
-      grammarCorrections: parsed.grammarCorrections ?? [],
-      nativePolish: parsed.nativePolish ?? '',
-      suggestions: parsed.suggestions ?? [],
-      raw,
-    };
-  } catch {
-    return {
-      score: 0,
-      grammarCorrections: [],
-      nativePolish: '',
-      suggestions: [],
-      raw,
-    };
+export async function* streamScore(
+  userText: string,
+  scene: Scene,
+  words: { word: string; meaning: string }[],
+): AsyncGenerator<string> {
+  const result = scoreResponse(userText, scene, words)
+  const tokens = result.feedback.split(/(\s+)/)
+  for (const token of tokens) {
+    await new Promise((r) => setTimeout(r, 30))
+    yield token
   }
 }

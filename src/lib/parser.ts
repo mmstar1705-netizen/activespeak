@@ -1,47 +1,65 @@
-import type { Word } from '@/types';
-import { createSM2State } from './sm2';
+/**
+ * Parse various word import formats:
+ * - One word per line
+ * - word,meaning (CSV)
+ * - word - meaning
+ * - word: meaning
+ * - word meaning (tab or multiple spaces)
+ */
 
-export function parseWordlist(text: string): Word[] {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const words: Word[] = [];
+export interface ParsedWord {
+  word: string
+  meaning: string
+}
+
+export function parseWordList(input: string): ParsedWord[] {
+  const lines = input.split('\n').map((l) => l.trim()).filter(Boolean)
+  const results: ParsedWord[] = []
 
   for (const line of lines) {
-    const separators = ['\t', ' - ', ' — ', ' – ', '  ', '|', ','];
-    let word = '';
-    let meaning = '';
+    let word = ''
+    let meaning = ''
 
-    for (const sep of separators) {
-      const idx = line.indexOf(sep);
-      if (idx > 0) {
-        word = line.slice(0, idx).trim();
-        meaning = line.slice(idx + sep.length).trim();
-        break;
-      }
+    // Try " - " separator
+    if (line.includes(' - ')) {
+      const parts = line.split(' - ')
+      word = parts[0].trim()
+      meaning = parts.slice(1).join(' - ').trim()
+    }
+    // Try ":" separator
+    else if (line.includes(':')) {
+      const idx = line.indexOf(':')
+      word = line.slice(0, idx).trim()
+      meaning = line.slice(idx + 1).trim()
+    }
+    // Try "," separator (but not within the word itself)
+    else if (line.includes(',')) {
+      const parts = line.split(',')
+      word = parts[0].trim()
+      meaning = parts.slice(1).join(',').trim()
+    }
+    // Try tab separator
+    else if (line.includes('\t')) {
+      const parts = line.split('\t')
+      word = parts[0].trim()
+      meaning = parts.slice(1).join(' ').trim()
+    }
+    // Try multiple spaces
+    else if (/\s{2,}/.test(line)) {
+      const parts = line.split(/\s{2,}/)
+      word = parts[0].trim()
+      meaning = parts.slice(1).join(' ').trim()
+    }
+    // Just a word
+    else {
+      word = line
+      meaning = ''
     }
 
-    if (!word) {
-      const parts = line.split(/\s+/);
-      if (parts.length >= 2) {
-        word = parts[0];
-        meaning = parts.slice(1).join(' ');
-      } else {
-        word = line;
-        meaning = '';
-      }
+    if (word) {
+      results.push({ word, meaning })
     }
-
-    words.push({
-      id: crypto.randomUUID(),
-      word: word,
-      meaning: meaning,
-      proficiency: 'new',
-      sm2: createSM2State(),
-      paused: false,
-      successCount: 0,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
   }
 
-  return words;
+  return results
 }
