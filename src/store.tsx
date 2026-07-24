@@ -47,8 +47,12 @@ function loadLocalData(): AppData {
       return {
         words: (parsed.words ?? []).map((w: any) => ({
           ...w,
+          proficiency: w.proficiency ?? 'new',
           paused: w.paused ?? false,
           successCount: w.successCount ?? 0,
+          sm2: w.sm2 ?? { ef: 2.5, interval: 0, repetitions: 0, nextReview: Date.now(), lastReview: null },
+          createdAt: w.createdAt ?? Date.now(),
+          updatedAt: w.updatedAt ?? Date.now(),
         })),
         groups: parsed.groups ?? [],
         settings: {
@@ -76,22 +80,23 @@ function saveLocalData(data: AppData) {
 // ── Supabase mappers ──
 
 function dbWordToWord(row: any): Word {
+  const now = Date.now();
   return {
     id: row.id,
-    word: row.word,
+    word: row.word ?? '',
     meaning: row.meaning ?? '',
     proficiency: row.proficiency ?? 'new',
     sm2: {
       ef: row.ef ?? 2.5,
       interval: row.interval ?? 0,
       repetitions: row.repetitions ?? 0,
-      nextReview: row.next_review ? new Date(row.next_review).getTime() : Date.now(),
+      nextReview: row.next_review ? new Date(row.next_review).getTime() : now,
       lastReview: row.last_review ? new Date(row.last_review).getTime() : null,
     },
     paused: row.paused ?? false,
     successCount: row.success_count ?? 0,
-    createdAt: new Date(row.created_at).getTime(),
-    updatedAt: new Date(row.updated_at).getTime(),
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : now,
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : now,
   };
 }
 
@@ -488,23 +493,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   const getDueWords = useCallback(
-    () => data.words.filter(w => !w.paused && isDueToday(w.sm2)),
+    () => data.words.filter(w => !(w?.paused) && w?.sm2 && isDueToday(w.sm2)),
     [data.words]
   );
 
   const getActiveWords = useCallback(
-    () => data.words.filter(w => !w.paused),
+    () => data.words.filter(w => !(w?.paused) && w?.sm2),
     [data.words]
   );
 
   const getStats = useCallback(() => {
     let newCount = 0, familiar = 0, mastered = 0, paused = 0, due = 0;
     for (const w of data.words) {
+      if (!w) continue;
       if (w.paused) { paused++; continue; }
       if (w.proficiency === 'new') newCount++;
       else if (w.proficiency === 'familiar') familiar++;
       else mastered++;
-      if (isDueToday(w.sm2)) due++;
+      if (w.sm2 && isDueToday(w.sm2)) due++;
     }
     return { total: data.words.length, new: newCount, familiar, mastered, due, paused };
   }, [data.words]);

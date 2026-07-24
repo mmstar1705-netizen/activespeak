@@ -40,23 +40,23 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
     const active = getActiveWords();
     if (active.length === 0) return [];
 
-    const due = active.filter(w => isDueToday(w.sm2));
+    const due = active.filter(w => w?.sm2 && isDueToday(w.sm2));
 
-    const wps = settings.srs.wordsPerScenario;
+    const wps = settings?.srs?.wordsPerScenario ?? 3;
 
     if (due.length >= wps) {
       return [...due].sort(() => Math.random() - 0.5).slice(0, wps);
     }
 
     // Fill remaining with new words
-    const newWords = active.filter(w => w.proficiency === 'new' && !due.includes(w));
+    const newWords = active.filter(w => (w?.proficiency ?? 'new') === 'new' && !due.includes(w));
     const combined = [...due, ...newWords.sort(() => Math.random() - 0.5)];
     if (combined.length >= wps) return combined.slice(0, wps);
 
     // Fill from any active words
     const remaining = active.filter(w => !combined.includes(w)).sort(() => Math.random() - 0.5);
     return [...combined, ...remaining].slice(0, Math.min(wps, active.length));
-  }, [getActiveWords, settings.srs.wordsPerScenario]);
+  }, [getActiveWords, settings]);
 
   // Save scenario to localStorage
   const saveScenario = useCallback((text: string, words: Word[], groups: string[][]) => {
@@ -75,7 +75,7 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
 
   // Restore words from cached word IDs
   const restoreWords = useCallback((wordIds: string[]): Word[] => {
-    return words.filter(w => wordIds.includes(w.id) && !w.paused);
+    return words.filter(w => wordIds.includes(w.id) && !(w?.paused));
   }, [words]);
 
   // Prefetch next scenario
@@ -169,13 +169,18 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
 
     try {
       const result = await generateScenario(settings, picked);
-      setScenario(result.scenario);
-      setSemanticGroups(result.semanticGroups);
+      setScenario(result.scenario || '请尝试用英语描述一个包含以上单词的日常场景。');
+      setSemanticGroups(result.semanticGroups || [picked.map(w => w.word)]);
       setPhase('scenario');
-      saveScenario(result.scenario, picked, result.semanticGroups);
+      saveScenario(result.scenario || '', picked, result.semanticGroups || []);
     } catch (e: any) {
-      setError(e.message || 'Failed to generate scenario.');
-      setPhase('idle');
+      // Fallback to a default scenario if API fails or times out
+      const fallbackScenario = `请尝试用英语描述一个包含以下单词的日常场景：${picked.map(w => w.word).join(', ')}。`;
+      setScenario(fallbackScenario);
+      setSemanticGroups([picked.map(w => w.word)]);
+      setPhase('scenario');
+      saveScenario(fallbackScenario, picked, [picked.map(w => w.word)]);
+      setError('AI 场景生成失败，已使用默认场景。你可以直接开始练习。');
     }
   };
 
@@ -307,14 +312,16 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
   };
 
   const getHint = (word: Word) => {
-    if (word.paused) return { label: 'Paused', type: 'none' as const };
-    switch (word.proficiency) {
+    if (word?.paused) return { label: 'Paused', type: 'none' as const };
+    switch (word?.proficiency) {
       case 'new':
         return { label: word.word, type: 'word' as const };
       case 'familiar':
         return { label: word.meaning, type: 'meaning' as const };
       case 'mastered':
         return { label: 'No hint', type: 'none' as const };
+      default:
+        return { label: word?.word ?? '', type: 'word' as const };
     }
   };
 
