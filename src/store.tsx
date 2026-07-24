@@ -23,8 +23,6 @@ interface StoreContextType {
   clearWords: () => void;
   updateWord: (id: string, updates: Partial<Word>) => void;
   deleteWord: (id: string) => void;
-  deleteWords: (ids: string[]) => void;
-  setPausedWords: (ids: string[], paused: boolean) => void;
   resetWordProgress: (id: string) => void;
   togglePauseWord: (id: string) => void;
   reviewWord: (id: string, quality: number, score?: number) => void;
@@ -87,8 +85,8 @@ function dbWordToWord(row: any): Word {
       ef: row.ef ?? 2.5,
       interval: row.interval ?? 0,
       repetitions: row.repetitions ?? 0,
-      nextReview: row.next_review ? new Date(row.next_review).getTime() : Date.now(),
-      lastReview: row.last_review ? new Date(row.last_review).getTime() : null,
+      nextReview: row.next_review ?? Date.now(),
+      lastReview: row.last_review ?? null,
     },
     paused: row.paused ?? false,
     successCount: row.success_count ?? 0,
@@ -106,8 +104,8 @@ function wordToDbWord(word: Word) {
     ef: word.sm2.ef,
     interval: word.sm2.interval,
     repetitions: word.sm2.repetitions,
-    next_review: new Date(word.sm2.nextReview).toISOString(),
-    last_review: word.sm2.lastReview ? new Date(word.sm2.lastReview).toISOString() : null,
+    next_review: word.sm2.nextReview,
+    last_review: word.sm2.lastReview,
     paused: word.paused,
     success_count: word.successCount,
   };
@@ -253,7 +251,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     syncToSupabase(async () => {
       const supabase = getSupabase()!;
       const patch: Record<string, any> = { updated_at: new Date().toISOString() };
-      if (updates.word !== undefined) patch.word = updates.word;
       if (updates.meaning !== undefined) patch.meaning = updates.meaning;
       if (updates.paused !== undefined) patch.paused = updates.paused;
       if (updates.proficiency !== undefined) patch.proficiency = updates.proficiency;
@@ -262,8 +259,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         patch.ef = updates.sm2.ef;
         patch.interval = updates.sm2.interval;
         patch.repetitions = updates.sm2.repetitions;
-        patch.next_review = new Date(updates.sm2.nextReview).toISOString();
-        patch.last_review = updates.sm2.lastReview ? new Date(updates.sm2.lastReview).toISOString() : null;
+        patch.next_review = updates.sm2.nextReview;
+        patch.last_review = updates.sm2.lastReview;
       }
       const { error } = await supabase.from('words').update(patch).eq('id', id);
       if (error) throw error;
@@ -280,40 +277,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     syncToSupabase(async () => {
       const supabase = getSupabase()!;
       const { error } = await supabase.from('words').delete().eq('id', id);
-      if (error) throw error;
-    });
-  }, [syncToSupabase]);
-
-  const deleteWords = useCallback((ids: string[]) => {
-    const idSet = new Set(ids);
-    setData(prev => {
-      const words = prev.words.filter(w => !idSet.has(w.id));
-      const groups = buildGroups(words);
-      return { ...prev, words, groups };
-    });
-
-    syncToSupabase(async () => {
-      const supabase = getSupabase()!;
-      const { error } = await supabase.from('words').delete().in('id', ids);
-      if (error) throw error;
-    });
-  }, [syncToSupabase]);
-
-  const setPausedWords = useCallback((ids: string[], paused: boolean) => {
-    const idSet = new Set(ids);
-    setData(prev => ({
-      ...prev,
-      words: prev.words.map(w =>
-        idSet.has(w.id) ? { ...w, paused, updatedAt: Date.now() } : w
-      ),
-    }));
-
-    syncToSupabase(async () => {
-      const supabase = getSupabase()!;
-      const { error } = await supabase.from('words').update({
-        paused,
-        updated_at: new Date().toISOString(),
-      }).in('id', ids);
       if (error) throw error;
     });
   }, [syncToSupabase]);
@@ -335,7 +298,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ef: freshSm2.ef,
         interval: freshSm2.interval,
         repetitions: freshSm2.repetitions,
-        next_review: new Date(freshSm2.nextReview).toISOString(),
+        next_review: freshSm2.nextReview,
         last_review: null,
         proficiency: 'new',
         success_count: 0,
@@ -389,8 +352,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ef: updatedWord.sm2.ef,
         interval: updatedWord.sm2.interval,
         repetitions: updatedWord.sm2.repetitions,
-        next_review: new Date(updatedWord.sm2.nextReview).toISOString(),
-        last_review: updatedWord.sm2.lastReview ? new Date(updatedWord.sm2.lastReview).toISOString() : null,
+        next_review: updatedWord.sm2.nextReview,
+        last_review: updatedWord.sm2.lastReview,
         proficiency: updatedWord.proficiency,
         success_count: updatedWord.successCount,
         updated_at: new Date().toISOString(),
@@ -559,8 +522,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         clearWords,
         updateWord,
         deleteWord,
-        deleteWords,
-        setPausedWords,
         resetWordProgress,
         togglePauseWord,
         reviewWord,
