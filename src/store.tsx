@@ -23,6 +23,8 @@ interface StoreContextType {
   clearWords: () => void;
   updateWord: (id: string, updates: Partial<Word>) => void;
   deleteWord: (id: string) => void;
+  deleteWords: (ids: string[]) => void;
+  setPausedWords: (ids: string[], paused: boolean) => void;
   resetWordProgress: (id: string) => void;
   togglePauseWord: (id: string) => void;
   reviewWord: (id: string, quality: number, score?: number) => void;
@@ -251,6 +253,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     syncToSupabase(async () => {
       const supabase = getSupabase()!;
       const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+      if (updates.word !== undefined) patch.word = updates.word;
       if (updates.meaning !== undefined) patch.meaning = updates.meaning;
       if (updates.paused !== undefined) patch.paused = updates.paused;
       if (updates.proficiency !== undefined) patch.proficiency = updates.proficiency;
@@ -277,6 +280,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     syncToSupabase(async () => {
       const supabase = getSupabase()!;
       const { error } = await supabase.from('words').delete().eq('id', id);
+      if (error) throw error;
+    });
+  }, [syncToSupabase]);
+
+  const deleteWords = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setData(prev => {
+      const words = prev.words.filter(w => !idSet.has(w.id));
+      const groups = buildGroups(words);
+      return { ...prev, words, groups };
+    });
+
+    syncToSupabase(async () => {
+      const supabase = getSupabase()!;
+      const { error } = await supabase.from('words').delete().in('id', ids);
+      if (error) throw error;
+    });
+  }, [syncToSupabase]);
+
+  const setPausedWords = useCallback((ids: string[], paused: boolean) => {
+    const idSet = new Set(ids);
+    setData(prev => ({
+      ...prev,
+      words: prev.words.map(w =>
+        idSet.has(w.id) ? { ...w, paused, updatedAt: Date.now() } : w
+      ),
+    }));
+
+    syncToSupabase(async () => {
+      const supabase = getSupabase()!;
+      const { error } = await supabase.from('words').update({
+        paused,
+        updated_at: new Date().toISOString(),
+      }).in('id', ids);
       if (error) throw error;
     });
   }, [syncToSupabase]);
@@ -522,6 +559,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         clearWords,
         updateWord,
         deleteWord,
+        deleteWords,
+        setPausedWords,
         resetWordProgress,
         togglePauseWord,
         reviewWord,
