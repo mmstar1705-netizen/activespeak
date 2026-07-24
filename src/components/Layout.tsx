@@ -100,10 +100,11 @@ export default function Layout({ currentPage, onNavigate, children }: LayoutProp
         </div>
       </header>
 
-      <main className="flex-1 pb-20 sm:pb-0">{children}</main>
+      <main className="flex-1 pb-36 sm:pb-0">{children}</main>
 
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-gray-100 z-[9999]" style={{ paddingBottom: 'var(--safe-bottom)' }}>
-        <div className="flex items-center justify-around h-16">
+      <nav className="sm:hidden fixed bottom-12 left-0 right-0 z-[9999] px-4">
+        <div className="bg-white/90 backdrop-blur-xl border border-gray-200/60 rounded-2xl shadow-2xl">
+          <div className="flex items-center justify-around h-14">
           {NAV_ITEMS.map(item => {
             const Icon = item.icon;
             return (
@@ -119,6 +120,7 @@ export default function Layout({ currentPage, onNavigate, children }: LayoutProp
               </button>
             );
           })}
+          </div>
         </div>
       </nav>
     </div>

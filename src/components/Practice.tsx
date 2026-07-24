@@ -1,14 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useStore } from '@/store';
 import { generateScenario, gradeSpeechStream } from '@/lib/llm';
-import { startRecording, isRecognitionSupported } from '@/lib/speech';
+import { startRecording, isRecognitionSupported, type RecordingController } from '@/lib/speech';
 import { isDueToday } from '@/lib/sm2';
-import { speak, isSpeechSupported } from '@/lib/tts';
+import { speak, isSpeechSupported, speakWithCloudTTS, stopCloudTTS } from '@/lib/tts';
 import type { Word, Feedback, CachedScenario } from '@/types';
-import { Mic, MicOff, Volume2, Sparkles, ChevronRight, RefreshCw, CheckCircle2, AlertCircle, Zap } from 'lucide-react';
+import { Mic, MicOff, Volume2, Sparkles, ChevronRight, RefreshCw, CheckCircle2, AlertCircle, Zap, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/Toast';
 
-type Phase = 'idle' | 'generating' | 'scenario' | 'recording' | 'grading' | 'feedback';
+type Phase = 'idle' | 'generating' | 'scenario' | 'recording' | 'transcribing' | 'grading' | 'feedback';
 
 const SCENARIO_CACHE_KEY = 'currentUnansweredScenario';
 const PREFETCH_CACHE_KEY = 'prefetchedScenario';
@@ -22,14 +22,15 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
   const [semanticGroups, setSemanticGroups] = useState<string[][]>([]);
   const [transcript, setTranscript] = useState('');
   const [editedTranscript, setEditedTranscript] = useState('');
-  const [interimText, setInterimText] = useState('');
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [error, setError] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
   const [groupIndex, setGroupIndex] = useState(0);
   const [prefetching, setPrefetching] = useState(false);
-  const recordingRef = useRef<{ stop: () => void } | null>(null);
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const recordingRef = useRef<RecordingController | null>(null);
   const prefetchRef = useRef(false);
 
   const speechSupported = isRecognitionSupported();
@@ -41,24 +42,20 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
     if (active.length === 0) return [];
 
     const due = active.filter(w => w?.sm2 && isDueToday(w.sm2));
-
     const wps = settings?.srs?.wordsPerScenario ?? 3;
 
     if (due.length >= wps) {
       return [...due].sort(() => Math.random() - 0.5).slice(0, wps);
     }
 
-    // Fill remaining with new words
     const newWords = active.filter(w => (w?.proficiency ?? 'new') === 'new' && !due.includes(w));
     const combined = [...due, ...newWords.sort(() => Math.random() - 0.5)];
     if (combined.length >= wps) return combined.slice(0, wps);
 
-    // Fill from any active words
     const remaining = active.filter(w => !combined.includes(w)).sort(() => Math.random() - 0.5);
     return [...combined, ...remaining].slice(0, Math.min(wps, active.length));
   }, [getActiveWords, settings]);
 
-  // Save scenario to localStorage
   const saveScenario = useCallback((text: string, words: Word[], groups: string[][]) => {
     const cache: CachedScenario = {
       scenario: text,
@@ -68,17 +65,14 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
     localStorage.setItem(SCENARIO_CACHE_KEY, JSON.stringify(cache));
   }, []);
 
-  // Clear scenario from localStorage
   const clearScenarioCache = useCallback(() => {
     localStorage.removeItem(SCENARIO_CACHE_KEY);
   }, []);
 
-  // Restore words from cached word IDs
   const restoreWords = useCallback((wordIds: string[]): Word[] => {
     return words.filter(w => wordIds.includes(w.id) && !(w?.paused));
   }, [words]);
 
-  // Prefetch next scenario
   const prefetchNext = useCallback(async () => {
     if (prefetchRef.current || prefetching) return;
     if (!settings.apiKey) return;
@@ -97,7 +91,7 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
         wordIds: picked.map(w => w.id),
       };
       localStorage.setItem(PREFETCH_CACHE_KEY, JSON.stringify(cache));
-    } catch (e) {
+    } catch {
       // silent fail
     } finally {
       prefetchRef.current = false;
@@ -105,7 +99,6 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
     }
   }, [settings, pickWords, prefetching]);
 
-  // Check for cached scenario on mount
   useEffect(() => {
     try {
       const cached = localStorage.getItem(SCENARIO_CACHE_KEY);
@@ -120,10 +113,9 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
           return;
         }
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
-    // No cache — start fresh
     handleStart();
   }, []);
 
@@ -138,7 +130,6 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
       return;
     }
 
-    // Try prefetch cache first
     try {
       const prefetched = localStorage.getItem(PREFETCH_CACHE_KEY);
       if (prefetched) {
@@ -154,7 +145,7 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
           return;
         }
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
 
@@ -173,8 +164,7 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
       setSemanticGroups(result.semanticGroups || [picked.map(w => w.word)]);
       setPhase('scenario');
       saveScenario(result.scenario || '', picked, result.semanticGroups || []);
-    } catch (e: any) {
-      // Fallback to a default scenario if API fails or times out
+    } catch {
       const fallbackScenario = `请尝试用英语描述一个包含以下单词的日常场景：${picked.map(w => w.word).join(', ')}。`;
       setScenario(fallbackScenario);
       setSemanticGroups([picked.map(w => w.word)]);
@@ -186,29 +176,37 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
 
   const handleRecord = async () => {
     if (!speechSupported) {
-      const msg = '当前浏览器不支持语音识别，建议使用 Android Chrome 或 Edge 浏览器打开。';
+      const msg = '当前浏览器不支持音频录制，请直接在下方文本框输入英文。';
       setError(msg);
       showToast('error', msg);
+      return;
+    }
+
+    if (!settings.apiKey) {
+      setError('请先在 Settings 中配置 API Key 以启用语音转文字。');
       return;
     }
 
     setError('');
     setTranscript('');
     setEditedTranscript('');
-    setInterimText('');
     setFeedback(null);
+    setRecordSeconds(0);
     setIsRecording(true);
     setPhase('recording');
 
     recordingRef.current = await startRecording(
-      (text) => {
-        setInterimText(text);
+      (status, elapsed) => {
+        if (status === 'recording') {
+          setRecordSeconds(elapsed);
+        } else if (status === 'transcribing') {
+          setIsRecording(false);
+          setPhase('transcribing');
+        }
       },
       (finalText) => {
         setTranscript(finalText);
         setEditedTranscript(finalText);
-        setInterimText('');
-        setIsRecording(false);
         setPhase('scenario');
       },
       (err) => {
@@ -216,7 +214,8 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
         showToast('error', err);
         setIsRecording(false);
         setPhase('scenario');
-      }
+      },
+      settings
     );
   };
 
@@ -227,7 +226,7 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
   const handleGrade = async () => {
     const finalText = editedTranscript.trim();
     if (!finalText) {
-      setError('Please speak something first.');
+      setError('Please speak or type something first.');
       return;
     }
 
@@ -249,16 +248,12 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
       setFeedback(result);
       setPhase('feedback');
 
-      // Apply SM-2 review
       const quality = result.score >= 80 ? 5 : result.score >= 60 ? 4 : result.score >= 40 ? 3 : result.score >= 20 ? 2 : 1;
       for (const w of activeWords) {
         reviewWord(w.id, quality, result.score);
       }
 
-      // Clear the answered scenario
       clearScenarioCache();
-
-      // Prefetch next scenario in background
       prefetchNext();
     } catch (e: any) {
       setError(e.message || 'Failed to grade speech.');
@@ -266,26 +261,31 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
     }
   };
 
-  const handlePlayTTS = () => {
-    if (feedback?.nativePolish) {
-      speak(feedback.nativePolish, settings.ttsVoice, settings.ttsRate);
+  const handlePlayTTS = async () => {
+    if (!feedback?.nativePolish) return;
+    setTtsLoading(true);
+    try {
+      const ok = await speakWithCloudTTS(feedback.nativePolish, settings);
+      if (!ok) {
+        speak(feedback.nativePolish, settings.ttsVoice, settings.ttsRate);
+      }
+    } finally {
+      setTtsLoading(false);
     }
   };
 
   const handleNext = () => {
-    // Clear cache on skip
     clearScenarioCache();
+    stopCloudTTS();
     setPhase('idle');
     setScenario('');
     setFeedback(null);
     setTranscript('');
     setEditedTranscript('');
-    setInterimText('');
     setActiveWords([]);
     setSemanticGroups([]);
     setStreamingText('');
 
-    // Try prefetched scenario first
     try {
       const prefetched = localStorage.getItem(PREFETCH_CACHE_KEY);
       if (prefetched) {
@@ -298,16 +298,14 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
           setPhase('scenario');
           saveScenario(parsed.scenario, restored, parsed.semanticGroups || []);
           localStorage.removeItem(PREFETCH_CACHE_KEY);
-          // Kick off next prefetch
           setTimeout(() => prefetchNext(), 100);
           return;
         }
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
 
-    // No prefetch — generate new
     handleStart();
   };
 
@@ -325,6 +323,12 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
     }
   };
 
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
   if (words.length === 0) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
@@ -340,7 +344,7 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+    <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12 pb-36">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Practice</h1>
         <div className="flex items-center gap-3">
@@ -396,8 +400,8 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
         </div>
       )}
 
-      {/* Phase: scenario / recording / grading */}
-      {(phase === 'scenario' || phase === 'recording' || phase === 'grading') && (
+      {/* Phase: scenario / recording / transcribing / grading */}
+      {(phase === 'scenario' || phase === 'recording' || phase === 'transcribing' || phase === 'grading') && (
         <div className="space-y-5">
           {/* Scenario card */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -444,18 +448,17 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
               <p className="text-sm text-gray-500 mb-4 text-center">
                 Describe the scenario in English using the target words.
               </p>
-              {speechSupported ? (
-                <div className="flex justify-center">
-                  <button onClick={handleRecord} className="flex flex-col items-center gap-2 group">
-                    <div className="w-20 h-20 bg-red-50 group-hover:bg-red-100 rounded-full flex items-center justify-center transition-colors">
-                      <Mic className="text-red-500" size={32} />
-                    </div>
-                    <span className="text-sm font-medium text-gray-700">Tap to Record</span>
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-amber-600 text-center mb-4">
-                  当前浏览器不支持语音识别，请直接在下方文本框输入英文，或使用 Chrome / Edge 浏览器。
+              <div className="flex justify-center">
+                <button onClick={handleRecord} className="flex flex-col items-center gap-2 group">
+                  <div className="w-20 h-20 bg-red-50 group-hover:bg-red-100 rounded-full flex items-center justify-center transition-colors">
+                    <Mic className="text-red-500" size={32} />
+                  </div>
+                  <span className="text-sm font-medium text-gray-700">Tap to Record</span>
+                </button>
+              </div>
+              {!speechSupported && (
+                <p className="text-xs text-amber-600 text-center mt-3">
+                  当前浏览器不支持音频录制，请直接在下方文本框输入英文。
                 </p>
               )}
 
@@ -483,36 +486,57 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
             </div>
           )}
 
-          {/* Recording in progress with live transcript */}
+          {/* Recording in progress */}
           {phase === 'recording' && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex flex-col items-center gap-4">
+                {/* Wave animation */}
+                <div className="flex items-center justify-center gap-1 h-12">
+                  {[0, 1, 2, 3, 4, 5, 6].map(i => (
+                    <span
+                      key={i}
+                      className="w-1.5 bg-red-400 rounded-full animate-pulse"
+                      style={{
+                        height: `${20 + Math.sin(i) * 20 + 20}px`,
+                        animationDelay: `${i * 120}ms`,
+                        animationDuration: '800ms',
+                      }}
+                    />
+                  ))}
+                </div>
                 <div className="flex items-center gap-2 text-red-500">
                   <span className="relative flex h-3 w-3">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
                   </span>
-                  <span className="text-sm font-medium">Listening... (tap stop when done)</span>
+                  <span className="text-sm font-medium tabular-nums">Recording... {formatTime(recordSeconds)}</span>
                 </div>
                 <button onClick={handleStopRecord} className="flex flex-col items-center gap-2 group">
                   <div className="w-20 h-20 bg-gray-100 group-hover:bg-gray-200 rounded-full flex items-center justify-center transition-colors">
                     <MicOff className="text-gray-600" size={32} />
                   </div>
-                  <span className="text-sm font-medium text-gray-700">Tap to Stop</span>
+                  <span className="text-sm font-medium text-gray-700">Tap to Stop & Transcribe</span>
                 </button>
-                {/* Live transcript display — always visible during recording */}
-                <div className="w-full mt-2 p-3 bg-gray-50 rounded-xl min-h-[60px]">
-                  <p className="text-xs text-gray-400 mb-1">Live Transcript</p>
-                  <p className="text-sm text-gray-700 leading-relaxed">
-                    {interimText || <span className="text-gray-300">Start speaking...</span>}
-                  </p>
-                </div>
+                <p className="text-xs text-gray-400 text-center">
+                  录音结束后将自动发送至 Whisper AI 转写为文字，请保持网络畅通。
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Transcribing */}
+          {phase === 'transcribing' && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
+              <div className="inline-flex flex-col items-center gap-3 text-gray-500">
+                <Loader2 size={28} className="animate-spin text-blue-500" />
+                <span className="text-sm font-medium">Transcribing with Whisper AI...</span>
+                <span className="text-xs text-gray-400">正在将录音转写为文字，请稍候</span>
               </div>
             </div>
           )}
 
           {/* Editable transcript + grade */}
-          {transcript && phase !== 'grading' && (
+          {transcript && (phase === 'scenario' || phase === 'grading') && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <h3 className="text-sm font-semibold text-gray-500 mb-2">Your Speech</h3>
               <p className="text-xs text-gray-400 mb-3">
@@ -595,21 +619,24 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
             </div>
           )}
 
-          {/* Native Polish with async TTS */}
+          {/* Native Polish with TTS */}
           {feedback.nativePolish && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <h3 className="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-1.5">
                 <Sparkles size={15} className="text-blue-500" /> Native Polish
               </h3>
               <p className="text-gray-800 leading-relaxed mb-4">"{feedback.nativePolish}"</p>
-              {ttsSupported && (
-                <button
-                  onClick={handlePlayTTS}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-medium hover:bg-blue-100 transition-colors text-sm"
-                >
-                  <Volume2 size={18} /> Play Native Audio
-                </button>
-              )}
+              <button
+                onClick={handlePlayTTS}
+                disabled={ttsLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-medium hover:bg-blue-100 transition-colors text-sm disabled:opacity-60"
+              >
+                {ttsLoading ? (
+                  <><Loader2 size={18} className="animate-spin" /> Loading...</>
+                ) : (
+                  <><Volume2 size={18} /> Play Native Audio</>
+                )}
+              </button>
             </div>
           )}
 

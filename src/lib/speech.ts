@@ -1,149 +1,131 @@
+import type { Settings } from '@/types';
+
 export interface RecordingController {
   stop: () => void;
 }
 
-type SpeechRecognitionCtor = new () => ISpeechRecognition;
-
-interface ISpeechRecognition {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  maxAlternatives: number;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-  onresult: ((event: any) => void) | null;
-  onerror: ((event: any) => void) | null;
-  onend: (() => void) | null;
-}
-
-function getRecognitionCtor(): SpeechRecognitionCtor | null {
-  const w = window as any;
-  return (w.SpeechRecognition || w.webkitSpeechRecognition) ?? null;
-}
-
 export function isRecognitionSupported(): boolean {
-  return getRecognitionCtor() !== null;
+  return (
+    typeof MediaRecorder !== 'undefined' &&
+    !!navigator.mediaDevices?.getUserMedia
+  );
 }
 
-/**
- * Ensure the microphone permission is granted before starting recognition.
- * On mobile, calling getUserMedia first reliably triggers the OS permission prompt.
- * The stream is released immediately after permission is confirmed.
- */
-async function ensureMicPermission(): Promise<void> {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(t => t.stop());
-  } catch (err: any) {
-    if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
-      throw new Error('not-allowed');
-    }
-    if (err?.name === 'NotFoundError' || err?.name === 'OverconstrainedError') {
-      throw new Error('no-mic');
-    }
-    // Other errors — proceed anyway, recognition.start() may still work
+export async function transcribeAudio(blob: Blob, settings: Settings): Promise<string> {
+  if (!settings.apiKey) {
+    throw new Error('请先在 Settings 中配置 API Key 以启用语音转文字。');
   }
+
+  const formData = new FormData();
+  const ext = blob.type.includes('webm') ? 'recording.webm' : blob.type.includes('mp4') ? 'recording.mp4' : 'recording.audio';
+  formData.append('file', blob, ext);
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'en');
+  formData.append('response_format', 'json');
+
+  const res = await fetch(`${settings.baseUrl}/audio/transcriptions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${settings.apiKey}`,
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Whisper 转写失败 (${res.status}): ${errText.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return (data.text || '').trim();
 }
 
 export async function startRecording(
-  onInterim: (text: string) => void,
+  onStatus: (status: 'recording' | 'transcribing', elapsedSec: number) => void,
   onFinal: (text: string) => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  settings: Settings
 ): Promise<RecordingController> {
-  const Ctor = getRecognitionCtor();
-  if (!Ctor) {
-    onError('当前浏览器不支持语音识别，建议使用 Android Chrome 或 Edge 浏览器打开。');
+  let stream: MediaStream | null = null;
+  let recorder: MediaRecorder | null = null;
+  let chunks: Blob[] = [];
+  let stopped = false;
+  let timerId: ReturnType<typeof setInterval> | null = null;
+  let elapsed = 0;
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err: any) {
+    if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
+      onError('无法使用麦克风，请在手机设置中开启浏览器的麦克风权限。');
+    } else if (err?.name === 'NotFoundError' || err?.name === 'OverconstrainedError') {
+      onError('未检测到麦克风设备，请检查设备连接。');
+    } else {
+      onError('无法启动录音，请稍后重试。');
+    }
     return { stop: () => {} };
   }
 
-  // Explicitly request mic permission first (mobile-friendly)
-  try {
-    await ensureMicPermission();
-  } catch (err: any) {
-    if (err.message === 'not-allowed') {
-      onError('无法使用麦克风，请在手机设置中开启浏览器的麦克风权限。');
-      return { stop: () => {} };
-    }
-    if (err.message === 'no-mic') {
-      onError('未检测到麦克风设备，请检查设备连接。');
-      return { stop: () => {} };
-    }
-    // non-fatal — continue
-  }
-
-  const recognition: ISpeechRecognition = new Ctor();
-  recognition.lang = 'en-US';
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
-
-  let stopped = false;
-  let finalText = '';
-
-  recognition.onresult = (event: any) => {
-    let interim = '';
-    let finalAccum = '';
-    for (let i = 0; i < event.results.length; i++) {
-      const result = event.results[i];
-      if (result.isFinal) {
-        finalAccum += result[0].transcript;
-      } else {
-        interim += result[0].transcript;
-      }
-    }
-    finalText = finalAccum;
-    onInterim(finalText + interim);
-  };
-
-  recognition.onerror = (event: any) => {
-    if (stopped) return;
-    const code = event.error || '';
-    if (code === 'no-speech' || code === 'aborted') return;
-    if (code === 'not-allowed' || code === 'service-not-allowed') {
-      onError('无法使用麦克风，请在手机设置中开启浏览器的麦克风权限。');
-      stopped = true;
-      return;
-    }
-    if (code === 'audio-capture') {
-      onError('未检测到麦克风设备，请检查设备连接。');
-      stopped = true;
-      return;
-    }
-    if (code === 'not-supported' || code === 'network') {
-      onError('语音识别不可用，请检查网络连接或更换为 Chrome / Edge 浏览器。');
-      stopped = true;
-      return;
-    }
-    onError(`录音错误: ${code}`);
-  };
-
-  recognition.onend = () => {
-    if (stopped) {
-      onFinal(finalText.trim());
-      return;
-    }
-    // Auto-restart for continuous dictation (unless intentionally stopped)
-    try {
-      recognition.start();
-    } catch {
-      onFinal(finalText.trim());
-    }
-  };
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/webm')
+      ? 'audio/webm'
+      : '';
 
   try {
-    recognition.start();
+    recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream);
   } catch {
-    onError('无法启动录音，请稍后重试。');
+    onError('当前浏览器不支持音频录制，请升级浏览器版本。');
+    stream.getTracks().forEach(t => t.stop());
+    return { stop: () => {} };
   }
+
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+
+  recorder.onstop = async () => {
+    if (timerId) clearInterval(timerId);
+    stream?.getTracks().forEach(t => t.stop());
+
+    if (stopped) {
+      // aborted — don't transcribe
+      return;
+    }
+
+    onStatus('transcribing', elapsed);
+
+    const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+
+    try {
+      const text = await transcribeAudio(blob, settings);
+      onFinal(text);
+    } catch (e: any) {
+      onError(e.message || '语音转写失败，请检查 API Key 和网络连接。');
+    } finally {
+      // Release memory — zero storage footprint
+      chunks = [];
+    }
+  };
+
+  recorder.start(1000);
+  onStatus('recording', 0);
+
+  timerId = setInterval(() => {
+    elapsed += 1;
+    onStatus('recording', elapsed);
+  }, 1000);
 
   return {
     stop: () => {
-      stopped = true;
-      try {
-        recognition.stop();
-      } catch {
-        onFinal(finalText.trim());
+      stopped = false;
+      if (timerId) clearInterval(timerId);
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop();
+      } else {
+        stream?.getTracks().forEach(t => t.stop());
       }
     },
   };

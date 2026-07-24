@@ -222,7 +222,24 @@ export default function Settings() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Text-to-Speech</h2>
 
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">Voice Language</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Cloud Neural TTS Voice</label>
+          <p className="text-xs text-gray-400 mb-2">
+            优先使用云端 Neural TTS 获取广播级真人发音（需配置 API Key）。若调用失败则自动回退到浏览器内置语音。
+          </p>
+          <select
+            value={local.ttsCloudVoice}
+            onChange={e => setLocal({ ...local, ttsCloudVoice: e.target.value })}
+            className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent mb-4"
+          >
+            <option value="nova">Nova (女声 · 自然亲切)</option>
+            <option value="alloy">Alloy (中性 · 平衡)</option>
+            <option value="echo">Echo (男声 · 沉稳)</option>
+            <option value="fable">Fable (中性 · 叙事)</option>
+            <option value="onyx">Onyx (男声 · 深沉)</option>
+            <option value="shimmer">Shimmer (女声 · 清亮)</option>
+          </select>
+
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Browser Fallback Voice Language</label>
           <select
             value={local.ttsVoice}
             onChange={e => setLocal({ ...local, ttsVoice: e.target.value })}

@@ -63,6 +63,7 @@ export interface Settings {
   baseUrl: string;
   ttsVoice: string;
   ttsRate: number;
+  ttsCloudVoice: string;
   srs: SrsSettings;
   supabase: SupabaseConfig | null;
 }
@@ -80,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: 'https://api.openai.com/v1',
   ttsVoice: 'en-US',
   ttsRate: 1,
+  ttsCloudVoice: 'nova',
   srs: DEFAULT_SRS,
   supabase: null,
 };
