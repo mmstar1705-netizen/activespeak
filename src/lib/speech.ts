@@ -83,16 +83,14 @@ export async function startRecording(
 
   recognition.onresult = (event: any) => {
     let interim = '';
-    let finalAccum = '';
-    for (let i = 0; i < event.results.length; i++) {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
       if (result.isFinal) {
-        finalAccum += result[0].transcript;
+        finalText += result[0].transcript;
       } else {
         interim += result[0].transcript;
       }
     }
-    finalText = finalAccum;
     onInterim(finalText + interim);
   };
 

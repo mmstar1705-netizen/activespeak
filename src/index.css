@@ -28,16 +28,14 @@ body {
   padding-bottom: var(--safe-bottom);
 }
 
-/* Hide Bolt brand watermark — forceful override */
-div[class*="bolt"],
-a[href*="bolt.new"],
-[class*="bolt-watermark"],
+/* Hide Bolt brand watermark */
 .bolt-templates-watermark,
-[data-bolt-badge] {
+[class*="bolt-watermark"],
+a[href*="bolt.new"][target="_blank"] {
   display: none !important;
   visibility: hidden !important;
-  opacity: 0 !important;
   pointer-events: none !important;
+  opacity: 0 !important;
   width: 0 !important;
   height: 0 !important;
 }
