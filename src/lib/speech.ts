@@ -1,130 +1,148 @@
+export interface RecordingController {
+  stop: () => void;
+}
+
+type SpeechRecognitionCtor = new () => ISpeechRecognition;
+
+interface ISpeechRecognition {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: any) => void) | null;
+  onerror: ((event: any) => void) | null;
+  onend: (() => void) | null;
+}
+
+function getRecognitionCtor(): SpeechRecognitionCtor | null {
+  const w = window as any;
+  return (w.SpeechRecognition || w.webkitSpeechRecognition) ?? null;
+}
+
+export function isRecognitionSupported(): boolean {
+  return getRecognitionCtor() !== null;
+}
+
 /**
- * Speech recognition wrapper with mobile compatibility.
- * - Requests microphone permission via getUserMedia before starting
- * - Supports both SpeechRecognition and webkitSpeechRecognition
- * - Continuous recognition with incremental text concatenation
- * - Manual stop only (no auto-stop on silence)
+ * Ensure the microphone permission is granted before starting recognition.
+ * On mobile, calling getUserMedia first reliably triggers the OS permission prompt.
+ * The stream is released immediately after permission is confirmed.
  */
-
-type SpeechRecognitionType = {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  onresult: ((event: any) => void) | null
-  onerror: ((event: any) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-  abort: () => void
+async function ensureMicPermission(): Promise<void> {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
+  } catch (err: any) {
+    if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
+      throw new Error('not-allowed');
+    }
+    if (err?.name === 'NotFoundError' || err?.name === 'OverconstrainedError') {
+      throw new Error('no-mic');
+    }
+    // Other errors — proceed anyway, recognition.start() may still work
+  }
 }
 
-function getRecognitionClass(): { new (): SpeechRecognitionType } | null {
-  const w = window as any
-  return w.SpeechRecognition || w.webkitSpeechRecognition || null
-}
-
-export function isSpeechRecognitionSupported(): boolean {
-  return getRecognitionClass() !== null
-}
-
-export class SpeechController {
-  private recognition: SpeechRecognitionType | null = null
-  private stream: MediaStream | null = null
-  private accumulated: string = ''
-  private onText: ((text: string, isFinal: boolean) => void) | null = null
-  private onEnd: (() => void) | null = null
-  private manuallyStopped = false
-  private running = false
-
-  setCallbacks(onText: (text: string, isFinal: boolean) => void, onEnd: () => void) {
-    this.onText = onText
-    this.onEnd = onEnd
+export async function startRecording(
+  onInterim: (text: string) => void,
+  onFinal: (text: string) => void,
+  onError: (err: string) => void
+): Promise<RecordingController> {
+  const Ctor = getRecognitionCtor();
+  if (!Ctor) {
+    onError('当前浏览器不支持语音识别，建议使用 Android Chrome 或 Edge 浏览器打开。');
+    return { stop: () => {} };
   }
 
-  isRunning(): boolean {
-    return this.running
+  // Explicitly request mic permission first (mobile-friendly)
+  try {
+    await ensureMicPermission();
+  } catch (err: any) {
+    if (err.message === 'not-allowed') {
+      onError('无法使用麦克风，请在手机设置中开启浏览器的麦克风权限。');
+      return { stop: () => {} };
+    }
+    if (err.message === 'no-mic') {
+      onError('未检测到麦克风设备，请检查设备连接。');
+      return { stop: () => {} };
+    }
+    // non-fatal — continue
   }
 
-  async start(lang: string = 'en-US'): Promise<void> {
-    const RecognitionClass = getRecognitionClass()
-    if (!RecognitionClass) {
-      throw new Error('UNSUPPORTED')
-    }
+  const recognition: ISpeechRecognition = new Ctor();
+  recognition.lang = 'en-US';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
 
-    // Explicitly request microphone permission (mobile compatibility)
-    try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch (err: any) {
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        throw new Error('NOT_ALLOWED')
-      }
-      throw new Error('MIC_ERROR')
-    }
+  let stopped = false;
+  let finalText = '';
 
-    this.recognition = new RecognitionClass()
-    this.recognition.continuous = true
-    this.recognition.interimResults = true
-    this.recognition.lang = lang
-    this.accumulated = ''
-    this.manuallyStopped = false
-    this.running = true
-
-    this.recognition.onresult = (event: any) => {
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript
-        if (event.results[i].isFinal) {
-          this.accumulated += transcript
-        } else {
-          interim += transcript
-        }
-      }
-      const display = this.accumulated + interim
-      this.onText?.(display.trim(), false)
-    }
-
-    this.recognition.onerror = (event: any) => {
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        this.running = false
-        this.onEnd?.()
-      }
-    }
-
-    this.recognition.onend = () => {
-      // Auto-restart if not manually stopped (mobile browsers stop on silence)
-      if (!this.manuallyStopped && this.running) {
-        try {
-          this.recognition?.start()
-        } catch {
-          this.running = false
-          this.onEnd?.()
-        }
+  recognition.onresult = (event: any) => {
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      if (result.isFinal) {
+        finalText += result[0].transcript;
       } else {
-        this.running = false
-        this.onEnd?.()
+        interim += result[0].transcript;
       }
     }
+    onInterim(finalText + interim);
+  };
 
-    this.recognition.start()
+  recognition.onerror = (event: any) => {
+    if (stopped) return;
+    const code = event.error || '';
+    if (code === 'no-speech' || code === 'aborted') return;
+    if (code === 'not-allowed' || code === 'service-not-allowed') {
+      onError('无法使用麦克风，请在手机设置中开启浏览器的麦克风权限。');
+      stopped = true;
+      return;
+    }
+    if (code === 'audio-capture') {
+      onError('未检测到麦克风设备，请检查设备连接。');
+      stopped = true;
+      return;
+    }
+    if (code === 'not-supported' || code === 'network') {
+      onError('语音识别不可用，请检查网络连接或更换为 Chrome / Edge 浏览器。');
+      stopped = true;
+      return;
+    }
+    onError(`录音错误: ${code}`);
+  };
+
+  recognition.onend = () => {
+    if (stopped) {
+      onFinal(finalText.trim());
+      return;
+    }
+    // Auto-restart for continuous dictation (unless intentionally stopped)
+    try {
+      recognition.start();
+    } catch {
+      onFinal(finalText.trim());
+    }
+  };
+
+  try {
+    recognition.start();
+  } catch {
+    onError('无法启动录音，请稍后重试。');
   }
 
-  stop(): void {
-    this.manuallyStopped = true
-    this.running = false
-    if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop())
-      this.stream = null
-    }
-    if (this.recognition) {
+  return {
+    stop: () => {
+      stopped = true;
       try {
-        this.recognition.stop()
+        recognition.stop();
       } catch {
-        // already stopped
+        onFinal(finalText.trim());
       }
-    }
-  }
-
-  getText(): string {
-    return this.accumulated.trim()
-  }
+    },
+  };
 }

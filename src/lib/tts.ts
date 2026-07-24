@@ -1,19 +1,30 @@
-/**
- * TTS (Text-to-Speech) with async loading — does not block UI rendering.
- * Loads audio in the background; the UI renders text immediately.
- */
+export function speak(text: string, voice: string = 'en-US', rate: number = 1): void {
+  if (!('speechSynthesis' in window)) {
+    console.warn('Speech synthesis not supported');
+    return;
+  }
 
-export function speak(text: string, lang: string = 'en-US'): void {
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = lang
-  utterance.rate = 0.9
-  window.speechSynthesis.speak(utterance)
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = voice;
+  utterance.rate = rate;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+
+  const voices = window.speechSynthesis.getVoices();
+  const match = voices.find(v => v.lang === voice);
+  if (match) utterance.voice = match;
+
+  window.speechSynthesis.speak(utterance);
 }
 
 export function stopSpeaking(): void {
   if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel()
+    window.speechSynthesis.cancel();
   }
+}
+
+export function isSpeechSupported(): boolean {
+  return 'speechSynthesis' in window;
 }

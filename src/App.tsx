@@ -1,31 +1,29 @@
-import { useState } from 'react'
-import { StoreProvider } from '@/store'
-import { Layout } from '@/components/Layout'
-import type { Tab } from '@/components/Layout'
-import { Dashboard } from '@/components/Dashboard'
-import { Practice } from '@/components/Practice'
-import { Vocabulary } from '@/components/Vocabulary'
-import { Settings } from '@/components/Settings'
-import { ToastContainer } from '@/components/Toast'
+import { useState } from 'react';
+import { StoreProvider } from '@/store';
+import { ToastProvider } from '@/components/Toast';
+import Layout from '@/components/Layout';
+import Dashboard from '@/components/Dashboard';
+import WordImport from '@/components/WordImport';
+import Practice from '@/components/Practice';
+import Settings from '@/components/Settings';
+import Vocabulary from '@/components/Vocabulary';
 
-function AppContent() {
-  const [tab, setTab] = useState<Tab>('dashboard')
+function App() {
+  const [page, setPage] = useState('dashboard');
 
   return (
-    <Layout activeTab={tab} onTabChange={setTab}>
-      {tab === 'dashboard' && <Dashboard onTabChange={setTab} />}
-      {tab === 'practice' && <Practice />}
-      {tab === 'vocabulary' && <Vocabulary />}
-      {tab === 'settings' && <Settings />}
-    </Layout>
-  )
+    <ToastProvider>
+      <StoreProvider>
+        <Layout currentPage={page} onNavigate={setPage}>
+          {page === 'dashboard' && <Dashboard onNavigate={setPage} />}
+          {page === 'import' && <WordImport onNavigate={setPage} />}
+          {page === 'practice' && <Practice onNavigate={setPage} />}
+          {page === 'vocabulary' && <Vocabulary onNavigate={setPage} />}
+          {page === 'settings' && <Settings />}
+        </Layout>
+      </StoreProvider>
+    </ToastProvider>
+  );
 }
 
-export default function App() {
-  return (
-    <StoreProvider>
-      <AppContent />
-      <ToastContainer />
-    </StoreProvider>
-  )
-}
+export default App;
