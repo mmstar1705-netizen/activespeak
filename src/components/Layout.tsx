@@ -102,7 +102,7 @@ export default function Layout({ currentPage, onNavigate, children }: LayoutProp
 
       <main className="flex-1 pb-20 sm:pb-0">{children}</main>
 
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-gray-100 z-10" style={{ paddingBottom: 'var(--safe-bottom)' }}>
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-gray-100 z-[9999]" style={{ paddingBottom: 'var(--safe-bottom)' }}>
         <div className="flex items-center justify-around h-16">
           {NAV_ITEMS.map(item => {
             const Icon = item.icon;

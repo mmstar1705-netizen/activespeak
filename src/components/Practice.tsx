@@ -444,19 +444,42 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
               <p className="text-sm text-gray-500 mb-4 text-center">
                 Describe the scenario in English using the target words.
               </p>
-              <div className="flex justify-center">
-                <button onClick={handleRecord} className="flex flex-col items-center gap-2 group">
-                  <div className="w-20 h-20 bg-red-50 group-hover:bg-red-100 rounded-full flex items-center justify-center transition-colors">
-                    <Mic className="text-red-500" size={32} />
-                  </div>
-                  <span className="text-sm font-medium text-gray-700">Tap to Record</span>
-                </button>
-              </div>
-              {!speechSupported && (
-                <p className="text-xs text-amber-600 text-center mt-3">
-                  Speech recognition requires Chrome or Edge browser.
+              {speechSupported ? (
+                <div className="flex justify-center">
+                  <button onClick={handleRecord} className="flex flex-col items-center gap-2 group">
+                    <div className="w-20 h-20 bg-red-50 group-hover:bg-red-100 rounded-full flex items-center justify-center transition-colors">
+                      <Mic className="text-red-500" size={32} />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">Tap to Record</span>
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-amber-600 text-center mb-4">
+                  当前浏览器不支持语音识别，请直接在下方文本框输入英文，或使用 Chrome / Edge 浏览器。
                 </p>
               )}
+
+              {/* Fallback manual text input — always available */}
+              <div className="mt-4">
+                <label className="text-xs text-gray-400 mb-1.5 block">手动输入 / Manual Input</label>
+                <textarea
+                  value={editedTranscript}
+                  onChange={e => {
+                    setEditedTranscript(e.target.value);
+                    setTranscript(e.target.value);
+                  }}
+                  className="w-full h-28 p-3 border border-gray-200 rounded-xl text-sm text-gray-800 leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                  placeholder="Type your answer here if speech recognition is unavailable..."
+                />
+                {editedTranscript.trim() && (
+                  <button
+                    onClick={handleGrade}
+                    className="w-full mt-3 py-2.5 bg-gray-900 text-white rounded-xl font-medium hover:bg-gray-800 transition-colors text-sm"
+                  >
+                    提交评估 Submit
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -477,12 +500,13 @@ export default function Practice({ onNavigate }: { onNavigate: (page: string) =>
                   </div>
                   <span className="text-sm font-medium text-gray-700">Tap to Stop</span>
                 </button>
-                {/* Live transcript display */}
-                {interimText && (
-                  <div className="w-full mt-2 p-3 bg-gray-50 rounded-xl">
-                    <p className="text-sm text-gray-600 leading-relaxed">{interimText}</p>
-                  </div>
-                )}
+                {/* Live transcript display — always visible during recording */}
+                <div className="w-full mt-2 p-3 bg-gray-50 rounded-xl min-h-[60px]">
+                  <p className="text-xs text-gray-400 mb-1">Live Transcript</p>
+                  <p className="text-sm text-gray-700 leading-relaxed">
+                    {interimText || <span className="text-gray-300">Start speaking...</span>}
+                  </p>
+                </div>
               </div>
             </div>
           )}
